@@ -1,0 +1,24 @@
+[Unit]
+Description=Ratspeak AI LXMF gateway bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ratspeak
+Group=ratspeak
+WorkingDirectory=/opt/ratspeak-ai
+EnvironmentFile=/etc/ratspeak-ai/env
+ExecStart=/opt/ratspeak-ai/.venv/bin/ratspeak-ai-bot --config /etc/ratspeak-ai/config.toml
+Restart=on-failure
+RestartSec=10s
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ratspeak-ai/state
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

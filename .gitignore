@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+state/
+config.toml
+.env
+*.sqlite
+*.sqlite-journal
+.DS_Store

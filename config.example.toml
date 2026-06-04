@@ -1,0 +1,72 @@
+# ratspeak-ai-bot example config.
+# Copy to config.toml and edit. Anything you leave commented uses the default.
+
+[bot]
+# Display name announced on the mesh.
+display_name = "ratspeak-ai"
+
+# Where the bot's identity + LXMF storage live. Keep this safe — it's the bot's address.
+storage_dir = "./state"
+
+# How often to re-announce (seconds). Reticulum docs suggest 6h+ for stable nodes.
+announce_interval = 21600
+
+# Stamp cost: proof-of-work bits required from senders. 0 = none, 8 = mild spam deterrent,
+# 16 = noticeable on phones. LXMF default is 8.
+stamp_cost = 8
+
+# Reticulum config dir. Leave empty to use ~/.reticulum.
+reticulum_configdir = ""
+
+
+[venice]
+# OpenAI-compatible base URL. Override to point at another provider if you like.
+base_url = "https://api.venice.ai/api/v1"
+# API key comes from VENICE_API_KEY env var. Don't put it here.
+
+# Default model — used when a peer hasn't selected one with /model.
+default_model = "venice-uncensored"
+
+# Allowed models. /model <name> only succeeds if the name is on this list.
+# Keep this list tight if you're subsidizing — frontier models burn credits fast.
+allowed_models = [
+    "venice-uncensored",
+    "llama-3.3-70b",
+    "qwen-2.5-coder-32b",
+]
+
+# Max tokens per reply. Caps both cost and on-the-wire LXMF size.
+max_tokens = 800
+
+# Temperature for replies.
+temperature = 0.7
+
+# System prompt. Kept short so it doesn't eat the context window.
+system_prompt = """\
+You are an AI assistant reached over the Reticulum mesh via LXMF. \
+Be concise — replies travel over high-latency, low-bandwidth links. \
+Prefer plain text. Avoid markdown tables. \
+Honour user privacy; never ask for identifying info.\
+"""
+
+
+[memory]
+# Per-peer rolling conversation window. Set to 0 to disable memory entirely.
+history_turns = 8
+
+# Where the SQLite store lives.
+db_path = "./state/conversations.sqlite"
+
+
+[ratelimit]
+# Sliding-window cap: max messages per peer per window_seconds.
+messages_per_window = 20
+window_seconds = 3600
+
+# Daily token quota per peer (input + output). 0 = unlimited.
+daily_token_quota = 50000
+
+
+[logging]
+# debug | info | warning | error
+level = "info"
