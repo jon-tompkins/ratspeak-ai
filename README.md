@@ -18,7 +18,7 @@ Long-term: local edge inference on networking nodes (small models on Pis hanging
 pip install -e .
 
 # 2. Set your Venice key
-export VENICE_API_KEY=...
+export VENICE_API_KEY=VENICE_INFERENCE_KEY_xxx...  # use the full string from venice.ai, including the VENICE_INFERENCE_KEY_ prefix
 
 # 3. Copy config, edit display name + any model overrides
 cp config.example.toml config.toml

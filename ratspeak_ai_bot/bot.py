@@ -124,7 +124,7 @@ class Bot:
 
         t = threading.Thread(
             target=self._handle_message,
-            args=(peer_hex, source_identity, body, display_name),
+            args=(peer_hex, source_identity, source_hash, body, display_name),
             daemon=True,
         )
         t.start()
@@ -132,7 +132,8 @@ class Bot:
     def _handle_message(
         self,
         peer_hex: str,
-        source_identity: "RNS.Identity",
+        source_identity,
+        source_hash: bytes,
         body: str,
         display_name: str | None,
     ) -> None:
@@ -147,14 +148,14 @@ class Bot:
             venice=self._venice,
         )
         if cmd_result is not None:
-            self._send_reply(source_identity, cmd_result.reply)
+            self._send_reply(source_identity or source_hash, cmd_result.reply)
             return
 
         # Rate / quota
         tokens_today, _ = self._memory.usage_today(peer_hex)
         decision = self._ratelimit.check(peer_hex, tokens_today)
         if not decision.allowed:
-            self._send_reply(source_identity, decision.reason)
+            self._send_reply(source_identity or source_hash, decision.reason)
             return
 
         # Build chat context
@@ -177,7 +178,7 @@ class Bot:
         except Exception as exc:
             log.exception("inference failed: %s", exc)
             self._send_reply(
-                source_identity,
+                source_identity or source_hash,
                 "Sorry — the model call failed. Try again, or /reset if it keeps happening.",
             )
             return
@@ -198,16 +199,31 @@ class Bot:
             result.prompt_tokens,
             result.completion_tokens,
         )
-        self._send_reply(source_identity, reply, title="Re: " + (display_name or "chat"))
+        self._send_reply(source_identity or source_hash, reply, title="Re: " + (display_name or "chat"))
 
     # ----------------------------------------------------------------- outbound
 
     def _send_reply(
-        self, source_identity: "RNS.Identity", text: str, *, title: str = "Re: chat"
+        self, source_identity, text: str, *, title: str = "Re: chat"
     ) -> None:
         try:
+            identity = source_identity
+            identity_hash = None
+            if isinstance(identity, RNS.Destination):
+                identity_hash = identity.hash
+                identity = identity.identity
+            elif isinstance(identity, (bytes, bytearray)):
+                identity_hash = bytes(identity)
+                identity = RNS.Identity.recall(identity_hash)
+            if not isinstance(identity, RNS.Identity):
+                if identity_hash is not None:
+                    RNS.Transport.request_path(identity_hash)
+                    log.warning("no identity for %s, requested path; reply dropped", RNS.hexrep(identity_hash, delimit=False))
+                else:
+                    log.warning("no identity available for reply; dropped (type=%s)", type(source_identity).__name__)
+                return
             dest = RNS.Destination(
-                source_identity,
+                identity,
                 RNS.Destination.OUT,
                 RNS.Destination.SINGLE,
                 "lxmf",
