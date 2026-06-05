@@ -25,7 +25,7 @@ class RateLimiter:
         self._daily_quota = daily_token_quota
         self._hits: dict[str, deque[float]] = defaultdict(deque)
 
-    def check(self, peer_hash: str, tokens_today: int) -> RateDecision:
+    def check(self, peer_hash: str, tokens_today: int, *, quota_override: int | None = None) -> RateDecision:
         now = time.monotonic()
         bucket = self._hits[peer_hash]
         cutoff = now - self._window
@@ -40,11 +40,12 @@ class RateLimiter:
                 retry_after_seconds=retry,
             )
 
-        if self._daily_quota and tokens_today >= self._daily_quota:
+        effective_quota = quota_override if quota_override else self._daily_quota
+        if effective_quota and tokens_today >= effective_quota:
             return RateDecision(
                 allowed=False,
                 reason=(
-                    f"daily token quota reached ({tokens_today}/{self._daily_quota}). "
+                    f"daily token quota reached ({tokens_today}/{effective_quota}). "
                     "Resets at 00:00 UTC."
                 ),
             )

@@ -50,12 +50,18 @@ class LoggingConfig:
 
 
 @dataclass
+class OwnerConfig:
+    lxmf_addr: str = ""
+
+
+@dataclass
 class Config:
     bot: BotConfig = field(default_factory=BotConfig)
     venice: VeniceConfig = field(default_factory=VeniceConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     ratelimit: RateLimitConfig = field(default_factory=RateLimitConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    owner: OwnerConfig = field(default_factory=OwnerConfig)
 
 
 def load(path: str | os.PathLike[str]) -> Config:
@@ -71,10 +77,15 @@ def load(path: str | os.PathLike[str]) -> Config:
         memory=MemoryConfig(**raw.get("memory", {})),
         ratelimit=RateLimitConfig(**raw.get("ratelimit", {})),
         logging=LoggingConfig(**raw.get("logging", {})),
+        owner=OwnerConfig(**raw.get("owner", {})),
     )
 
     api_key = os.environ.get("VENICE_API_KEY", "").strip()
     if api_key:
         cfg.venice.api_key = api_key
+
+    owner_addr = os.environ.get("OWNER_LXMF_ADDR", "").strip().lower()
+    if owner_addr:
+        cfg.owner.lxmf_addr = owner_addr
 
     return cfg

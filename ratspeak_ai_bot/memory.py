@@ -31,6 +31,22 @@ CREATE TABLE IF NOT EXISTS usage (
     messages  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (peer_hash, day)
 );
+
+CREATE TABLE IF NOT EXISTS bans (
+    peer_hash  TEXT PRIMARY KEY,
+    reason     TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS peer_quotas (
+    peer_hash TEXT PRIMARY KEY,
+    tokens    INTEGER NOT NULL
+);
 """
 
 
@@ -118,3 +134,75 @@ class Memory:
         if not row:
             return 0, 0
         return int(row[0]), int(row[1])
+
+    # ---- owner-facing ----
+    def global_usage_today(self) -> tuple[int, int, int]:
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(tokens),0), COALESCE(SUM(messages),0), COUNT(DISTINCT peer_hash) "
+            "FROM usage WHERE day = ?",
+            (day,),
+        ).fetchone()
+        return int(row[0]), int(row[1]), int(row[2])
+
+    def peer_summaries(self, limit: int = 20) -> list[tuple[str, str | None, int, int, int]]:
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        rows = self._conn.execute(
+            """
+            SELECT p.peer_hash, p.display_name, p.updated_at,
+                   COALESCE(u.tokens, 0), COALESCE(u.messages, 0)
+            FROM peers p
+            LEFT JOIN usage u ON u.peer_hash = p.peer_hash AND u.day = ?
+            ORDER BY p.updated_at DESC
+            LIMIT ?
+            """,
+            (day, limit),
+        ).fetchall()
+        return [(r[0], r[1], int(r[2]), int(r[3]), int(r[4])) for r in rows]
+
+    def set_banned(self, peer_hash: str, reason: str | None) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO bans (peer_hash, reason, created_at) VALUES (?, ?, ?)",
+            (peer_hash, reason, int(time.time())),
+        )
+
+    def unban(self, peer_hash: str) -> int:
+        cur = self._conn.execute("DELETE FROM bans WHERE peer_hash = ?", (peer_hash,))
+        return cur.rowcount
+
+    def is_banned(self, peer_hash: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM bans WHERE peer_hash = ? LIMIT 1", (peer_hash,)
+        ).fetchone()
+        return row is not None
+
+    def list_bans(self) -> list[tuple[str, str | None]]:
+        return [
+            (r[0], r[1])
+            for r in self._conn.execute(
+                "SELECT peer_hash, reason FROM bans ORDER BY created_at DESC"
+            ).fetchall()
+        ]
+
+    def get_setting(self, key: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value)
+        )
+
+    def set_peer_quota(self, peer_hash: str, tokens: int) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO peer_quotas (peer_hash, tokens) VALUES (?, ?)",
+            (peer_hash, tokens),
+        )
+
+    def get_peer_quota(self, peer_hash: str) -> int | None:
+        row = self._conn.execute(
+            "SELECT tokens FROM peer_quotas WHERE peer_hash = ?", (peer_hash,)
+        ).fetchone()
+        return int(row[0]) if row else None

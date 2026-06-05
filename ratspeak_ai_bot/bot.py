@@ -139,6 +139,13 @@ class Bot:
     ) -> None:
         self._memory.touch_peer(peer_hex, display_name)
 
+        is_owner = bool(self.cfg.owner.lxmf_addr) and peer_hex.lower() == self.cfg.owner.lxmf_addr.lower()
+
+        # Ban check (owner is never banned)
+        if not is_owner and self._memory.is_banned(peer_hex):
+            log.info("dropped inbound from banned peer %s", peer_hex)
+            return
+
         # Slash command? Short-circuit before hitting rate limit, since these are cheap.
         cmd_result = handle_command(
             body,
@@ -151,9 +158,10 @@ class Bot:
             self._send_reply(source_identity or source_hash, cmd_result.reply)
             return
 
-        # Rate / quota
+        # Rate / quota (per-peer override > global)
         tokens_today, _ = self._memory.usage_today(peer_hex)
-        decision = self._ratelimit.check(peer_hex, tokens_today)
+        peer_quota = self._memory.get_peer_quota(peer_hex)
+        decision = self._ratelimit.check(peer_hex, tokens_today, quota_override=peer_quota)
         if not decision.allowed:
             self._send_reply(source_identity or source_hash, decision.reason)
             return
@@ -164,9 +172,10 @@ class Bot:
         messages.extend(history)
         messages.append({"role": "user", "content": body})
 
-        chosen_model = self._memory.get_model(peer_hex) or self.cfg.venice.default_model
+        global_default = self._memory.get_setting("default_model") or self.cfg.venice.default_model
+        chosen_model = self._memory.get_model(peer_hex) or global_default
         if chosen_model not in self.cfg.venice.allowed_models:
-            chosen_model = self.cfg.venice.default_model
+            chosen_model = global_default
 
         try:
             result = self._venice.chat(
