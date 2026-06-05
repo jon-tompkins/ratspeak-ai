@@ -7,33 +7,30 @@ from .memory import Memory
 from .venice import VeniceClient
 
 
-HELP_TEXT = """\
-ratspeak-ai commands:
+HELP_TEXT = (
+    "ratspeak-ai commands\n\n"
+    "/help — this message\n\n"
+    "/about — what this bot is, and your current model\n\n"
+    "/reset — clear our conversation history\n\n"
+    "/model — show your current model\n\n"
+    "/model <name> — switch model (must be on /models)\n\n"
+    "/models — list allowed models\n\n"
+    "/usage — your usage today\n\n"
+    "/owner help — admin commands (owner only)\n\n"
+    "anything else is treated as a prompt."
+)
 
-  /help            Show this message.
-  /about           What this bot is and isn't.
-  /reset           Clear our conversation history.
-  /model           Show your current model.
-  /model <name>    Switch model (must be on the allowed list).
-  /models          List allowed models.
-  /usage           Your usage today.
-  /owner help      (owner only) admin commands.
-
-Anything else is treated as a prompt.\
-"""
-
-OWNER_HELP_TEXT = """\
-owner commands:
-
-  /owner stats                  Global usage today + peer count.
-  /owner peers [n]              Recent peers (default 20).
-  /owner setdefault <model>     Change global default model (DB-backed).
-  /owner ban <peer> [reason]    Block a peer hash from using the bot.
-  /owner unban <peer>           Unblock a peer.
-  /owner bans                   List current bans.
-  /owner quota <peer> <tokens>  Per-peer daily token override (0 = remove).
-  /owner help                   Show this message.\
-"""
+OWNER_HELP_TEXT = (
+    "owner commands\n\n"
+    "/owner stats — global usage today + peer count\n\n"
+    "/owner peers [n] — recent peers (default 20)\n\n"
+    "/owner setdefault <model> — change global default model\n\n"
+    "/owner ban <peer> [reason] — block a peer hash\n\n"
+    "/owner unban <peer> — unblock a peer\n\n"
+    "/owner bans — list current bans\n\n"
+    "/owner quota <peer> <tokens> — per-peer daily token override (0 = remove)\n\n"
+    "/owner help — this message"
+)
 
 
 def _short(peer: str) -> str:
@@ -55,8 +52,9 @@ def _handle_owner(
         default = memory.get_setting("default_model") or cfg.venice.default_model
         bans = len(memory.list_bans())
         return CommandResult(
-            f"today: {msgs} msgs · {tokens} tokens · {peers} peers\n"
-            f"default model: {default}\nbans: {bans}"
+            f"today: {msgs} msgs, {tokens} tokens, {peers} peers\n\n"
+            f"default model: {default}\n\n"
+            f"bans: {bans}"
         )
 
     if sub == "peers":
@@ -64,11 +62,11 @@ def _handle_owner(
         rows = memory.peer_summaries(limit=n)
         if not rows:
             return CommandResult("no peers yet.")
-        lines = [f"recent peers (top {len(rows)}):"]
+        lines = [f"recent peers (top {len(rows)})"]
         for peer, name, updated, tokens, msgs in rows:
             tag = name or "—"
-            lines.append(f"  {_short(peer)}  {tag}  today {msgs}m/{tokens}t")
-        return CommandResult("\n".join(lines))
+            lines.append(f"• {_short(peer)} · {tag} · {msgs}m/{tokens}t today")
+        return CommandResult("\n\n".join(lines))
 
     if sub == "setdefault":
         if not rest:
@@ -99,7 +97,7 @@ def _handle_owner(
         if not bans:
             return CommandResult("no bans.")
         return CommandResult(
-            "\n".join(f"  {_short(p)}  {r or ''}" for p, r in bans)
+            "\n\n".join(f"• {_short(p)}{(' · ' + r) if r else ''}" for p, r in bans)
         )
 
     if sub == "quota":
@@ -115,13 +113,13 @@ def _handle_owner(
 
     return CommandResult(f"unknown owner subcommand: {sub}. try /owner help")
 
-ABOUT_TEXT = """\
-You're talking to ratspeak-ai, a gateway bot that bridges Reticulum/LXMF to a \
-clearnet inference API. Your message to me is end-to-end encrypted on the mesh, \
-but I forward the text to the model provider over TLS — they see your prompts. \
-Don't send anything you wouldn't want a third party to read. \
-Source: github.com/ratspeak (or wherever this bot is hosted).\
-"""
+ABOUT_TEXT = (
+    "ratspeak-ai is a gateway bot bridging Reticulum/LXMF to a clearnet inference API.\n\n"
+    "your message is end-to-end encrypted on the mesh, but i forward the text to the model "
+    "provider over TLS — they see your prompts.\n\n"
+    "don't send anything you wouldn't want a third party to read.\n\n"
+    "source: github.com/jon-tompkins/ratspeak-ai"
+)
 
 
 @dataclass
@@ -151,7 +149,14 @@ def handle_command(
         return CommandResult(HELP_TEXT)
 
     if cmd == "/about":
-        return CommandResult(ABOUT_TEXT)
+        current = memory.get_model(peer_hash) or memory.get_setting("default_model") or cfg.venice.default_model
+        global_default = memory.get_setting("default_model") or cfg.venice.default_model
+        meta = (
+            f"\n\nyour model: {current}\n\n"
+            f"global default: {global_default}\n\n"
+            f"provider: {cfg.venice.base_url}"
+        )
+        return CommandResult(ABOUT_TEXT + meta)
 
     if cmd == "/reset":
         n = memory.reset(peer_hash)
@@ -169,8 +174,8 @@ def handle_command(
         return CommandResult(f"Model set to {arg}.")
 
     if cmd == "/models":
-        models = "\n".join(f"  - {m}" for m in cfg.venice.allowed_models)
-        return CommandResult(f"Allowed models:\n{models}")
+        models = "\n\n".join(f"• {m}" for m in cfg.venice.allowed_models)
+        return CommandResult(f"allowed models\n\n{models}")
 
     if cmd == "/usage":
         tokens, msgs = memory.usage_today(peer_hash)
