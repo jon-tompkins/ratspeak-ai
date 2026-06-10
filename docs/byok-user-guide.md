@@ -12,29 +12,27 @@ you were using the Venice web UI).
 
 ## What you need
 
-- A Reticulum/LXMF client. Easiest options:
-  - **Android:** [Sideband](https://play.google.com/store/apps/details?id=io.unsigned.sideband) (also on F-Droid)
-  - **Desktop/CLI:** [Nomadnet](https://github.com/markqvist/nomadnet)
-  - **Ratspeak client** (if you're already in that ecosystem)
+- An LXMF client. The recommended one is the **[Ratspeak app](https://ratspeak.org)** — it ships pre-configured to talk to `1.ratspeak.org`, which is the same hub this bot lives on, so there's no networking setup.
+  - Alternatives: [Sideband](https://play.google.com/store/apps/details?id=io.unsigned.sideband) (Android), [Nomadnet](https://github.com/markqvist/nomadnet) (desktop/CLI). Both work but require manually adding the hub.
 - A **Venice** account with API access — sign up at <https://venice.ai>. Even
   the free tier gets API access; usage is metered against your Diem balance.
 
 ---
 
-## Step 1 — Connect your client to the right hub
+## Step 1 — Connect your client to the Ratspeak hub
 
-Both you and the bot need to share at least one Reticulum hub.
+You and the bot need to share at least one Reticulum hub. The bot lives on `1.ratspeak.org:4242`.
 
-In Sideband:
+**Ratspeak app:** nothing to do — it ships connected to `1.ratspeak.org` out of the box. Skip to step 2.
 
-1. Open the side menu → **Connectivity**.
-2. Enable **"Use TCP tunnel"** (or "Connect via TCP" depending on version).
-3. Set:
-   - Host: `1.ratspeak.org`
-   - Port: `4242`
-4. Save. Your client will connect within a few seconds.
+**Sideband (Android):**
+1. Side menu → **Connectivity**.
+2. Enable **"Use TCP tunnel"** (or "Connect via TCP").
+3. Host: `1.ratspeak.org` · Port: `4242`. Save.
 
-(Any hub bridged to `1.ratspeak.org` works too. Most public hubs peer.)
+**Nomadnet / raw RNS:** add a `TCPClientInterface` pointing at `1.ratspeak.org:4242` in your `~/.reticulum/config`.
+
+Any other hub bridged to `1.ratspeak.org` works too.
 
 ---
 
@@ -46,12 +44,13 @@ The bot's address:
 19f0e22660bcc2c6ebde074ecac94a3c
 ```
 
-In Sideband:
+**Ratspeak app:** new conversation → paste the address → name it ("ratspeak-ai" works) → done. The app handles path requests automatically.
 
+**Sideband:**
 1. Conversations → "+" → **New conversation**.
 2. Paste the address.
-3. Name it whatever you like ("ratspeak-ai" works).
-4. Tap **Request Path**. Wait ~10s for the path to resolve.
+3. Name it ("ratspeak-ai").
+4. Tap **Request Path**. Wait ~10s.
 
 ---
 
