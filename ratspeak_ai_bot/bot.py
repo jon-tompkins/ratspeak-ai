@@ -11,9 +11,10 @@ import RNS
 
 from .commands import handle_command
 from .config import Config
+from .keystore import Keystore
 from .memory import Memory
 from .ratelimit import RateLimiter
-from .venice import VeniceClient
+from .venice import InferenceAuthError, VeniceClient
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class Bot:
         self._venice = VeniceClient(
             cfg.venice.base_url, cfg.venice.api_key, cfg.venice.default_model
         )
+        self._keystore = Keystore(storage / "keystore.key")
 
         log.info("bot LXMF address: %s", RNS.prettyhexrep(self._dest.hash))
         log.info("display name: %s", cfg.bot.display_name)
@@ -153,18 +155,29 @@ class Bot:
             cfg=self.cfg,
             memory=self._memory,
             venice=self._venice,
+            keystore=self._keystore,
         )
         if cmd_result is not None:
             self._send_reply(source_identity or source_hash, cmd_result.reply)
             return
 
-        # Rate / quota (per-peer override > global)
-        tokens_today, _ = self._memory.usage_today(peer_hex)
-        peer_quota = self._memory.get_peer_quota(peer_hex)
-        decision = self._ratelimit.check(peer_hex, tokens_today, quota_override=peer_quota)
-        if not decision.allowed:
-            self._send_reply(source_identity or source_hash, decision.reason)
-            return
+        # BYOK: if peer has a personal key, decrypt it and skip the shared quota.
+        key_row = self._memory.get_peer_api_key(peer_hex)
+        byok_key: str | None = None
+        if key_row:
+            byok_key = self._keystore.decrypt(key_row[1])
+            if byok_key is None:
+                log.warning("could not decrypt stored key for %s; dropping it", peer_hex)
+                self._memory.clear_peer_api_key(peer_hex)
+
+        if not byok_key:
+            # Rate / quota (per-peer override > global) — only applies to shared key.
+            tokens_today, _ = self._memory.usage_today(peer_hex)
+            peer_quota = self._memory.get_peer_quota(peer_hex)
+            decision = self._ratelimit.check(peer_hex, tokens_today, quota_override=peer_quota)
+            if not decision.allowed:
+                self._send_reply(source_identity or source_hash, decision.reason)
+                return
 
         # Build chat context
         history = self._memory.recent_turns(peer_hex)
@@ -183,7 +196,24 @@ class Bot:
                 model=chosen_model,
                 max_tokens=self.cfg.venice.max_tokens,
                 temperature=self.cfg.venice.temperature,
+                api_key=byok_key,
             )
+        except InferenceAuthError as exc:
+            log.warning("auth error for %s (byok=%s): %s", peer_hex, bool(byok_key), exc)
+            if byok_key:
+                self._memory.touch_peer_api_key(peer_hex, "auth_failed")
+                self._memory.clear_peer_api_key(peer_hex)
+                self._send_reply(
+                    source_identity or source_hash,
+                    "your Venice key was rejected — i've removed it. "
+                    "check venice.ai → API → Keys and try /setkey again.",
+                )
+            else:
+                self._send_reply(
+                    source_identity or source_hash,
+                    "the shared bot key was rejected by the provider. owner has been notified.",
+                )
+            return
         except Exception as exc:
             log.exception("inference failed: %s", exc)
             self._send_reply(
@@ -196,10 +226,14 @@ class Bot:
         if len(reply) > MAX_REPLY_CHARS:
             reply = reply[: MAX_REPLY_CHARS - 16] + "\n…[truncated]"
 
-        # Persist turn + usage
+        # Persist turn + usage (shared vs BYOK accounted separately)
         self._memory.append_turn(peer_hex, "user", body)
         self._memory.append_turn(peer_hex, "assistant", reply)
-        self._memory.add_usage(peer_hex, result.total_tokens)
+        if byok_key:
+            self._memory.add_byok_usage(peer_hex, result.total_tokens)
+            self._memory.touch_peer_api_key(peer_hex, "ok")
+        else:
+            self._memory.add_usage(peer_hex, result.total_tokens)
 
         log.info(
             "reply to %s: model=%s tokens=%d/%d",

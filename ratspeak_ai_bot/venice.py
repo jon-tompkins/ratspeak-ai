@@ -3,9 +3,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from openai import OpenAI, OpenAIError
+from openai import AuthenticationError, OpenAI, OpenAIError, PermissionDeniedError
 
 log = logging.getLogger(__name__)
+
+
+class InferenceAuthError(Exception):
+    """Raised when the provider rejects the credential (401/403)."""
 
 
 @dataclass
@@ -32,8 +36,13 @@ class VeniceClient:
             raise ValueError(
                 "No API key. Set VENICE_API_KEY (or whichever provider) before starting."
             )
+        self._base_url = base_url
         self._client = OpenAI(base_url=base_url, api_key=api_key)
         self._default_model = default_model
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
 
     def chat(
         self,
@@ -42,14 +51,21 @@ class VeniceClient:
         model: str | None = None,
         max_tokens: int = 800,
         temperature: float = 0.7,
+        api_key: str | None = None,
     ) -> CompletionResult:
         chosen = model or self._default_model
-        resp = self._client.chat.completions.create(
-            model=chosen,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
+        client = (
+            OpenAI(base_url=self._base_url, api_key=api_key) if api_key else self._client
         )
+        try:
+            resp = client.chat.completions.create(
+                model=chosen,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        except (AuthenticationError, PermissionDeniedError) as exc:
+            raise InferenceAuthError(str(exc)) from exc
         choice = resp.choices[0]
         text = (choice.message.content or "").strip()
         usage = resp.usage
@@ -59,6 +75,22 @@ class VeniceClient:
             prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
             completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
         )
+
+    def validate_key(self, api_key: str) -> tuple[bool, str]:
+        """Tiny ping to confirm the key works. Returns (ok, message)."""
+        client = OpenAI(base_url=self._base_url, api_key=api_key)
+        try:
+            client.chat.completions.create(
+                model=self._default_model,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1,
+                temperature=0,
+            )
+            return True, "ok"
+        except (AuthenticationError, PermissionDeniedError) as exc:
+            return False, f"rejected: {exc}"
+        except OpenAIError as exc:
+            return False, f"provider error: {exc}"
 
     def list_models(self) -> list[str]:
         try:

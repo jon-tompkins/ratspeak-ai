@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from .config import Config
+from .keystore import Keystore
 from .memory import Memory
 from .venice import VeniceClient
 
@@ -16,6 +18,9 @@ HELP_TEXT = (
     "/model <name> — switch model (must be on /models)\n\n"
     "/models — list allowed models\n\n"
     "/usage — your usage today\n\n"
+    "/setkey <venice_api_key> — bring your own key; billed to you\n\n"
+    "/keystatus — show whether a personal key is set\n\n"
+    "/clearkey — remove your stored key\n\n"
     "/owner help — admin commands (owner only)\n\n"
     "anything else is treated as a prompt."
 )
@@ -51,10 +56,12 @@ def _handle_owner(
         tokens, msgs, peers = memory.global_usage_today()
         default = memory.get_setting("default_model") or cfg.venice.default_model
         bans = len(memory.list_bans())
+        byok = memory.byok_peer_count()
         return CommandResult(
             f"today: {msgs} msgs, {tokens} tokens, {peers} peers\n\n"
             f"default model: {default}\n\n"
-            f"bans: {bans}"
+            f"bans: {bans}\n\n"
+            f"byok users: {byok}"
         )
 
     if sub == "peers":
@@ -135,6 +142,7 @@ def handle_command(
     cfg: Config,
     memory: Memory,
     venice: VeniceClient,
+    keystore: Keystore,
 ) -> CommandResult | None:
     """Returns a CommandResult if `text` was a slash command, else None."""
     s = text.strip()
@@ -151,10 +159,18 @@ def handle_command(
     if cmd == "/about":
         current = memory.get_model(peer_hash) or memory.get_setting("default_model") or cfg.venice.default_model
         global_default = memory.get_setting("default_model") or cfg.venice.default_model
+        key_row = memory.get_peer_api_key(peer_hash)
+        billing = (
+            f"billed to: your Venice key (…{key_row[2]})"
+            if key_row
+            else "billed to: shared bot key (rate-limited)"
+        )
         meta = (
             f"\n\nyour model: {current}\n\n"
             f"global default: {global_default}\n\n"
-            f"provider: {cfg.venice.base_url}"
+            f"provider: {cfg.venice.base_url}\n\n"
+            f"{billing}\n\n"
+            f"set your own key with /setkey — see /help"
         )
         return CommandResult(ABOUT_TEXT + meta)
 
@@ -179,10 +195,57 @@ def handle_command(
 
     if cmd == "/usage":
         tokens, msgs = memory.usage_today(peer_hash)
+        byok_tokens, byok_msgs = memory.byok_usage_today(peer_hash)
         override = memory.get_peer_quota(peer_hash)
         quota = override if override else cfg.ratelimit.daily_token_quota
-        quota_str = f"{tokens}/{quota}" if quota else f"{tokens} (unlimited)"
-        return CommandResult(f"Today: {msgs} messages, {quota_str} tokens.")
+        shared_str = f"{tokens}/{quota}" if quota else f"{tokens} (unlimited)"
+        lines = [f"Today (shared key): {msgs} messages, {shared_str} tokens."]
+        if byok_msgs or memory.get_peer_api_key(peer_hash):
+            lines.append(f"Today (your key): {byok_msgs} messages, {byok_tokens} tokens (no bot-side quota).")
+        return CommandResult("\n\n".join(lines))
+
+    if cmd == "/setkey":
+        if not arg:
+            return CommandResult(
+                "usage: /setkey <venice_api_key>\n\n"
+                "grab one at venice.ai → API → Keys.\n\n"
+                "the key is encrypted at rest on the bot host. inference is billed to your account.\n\n"
+                "tip: after the bot confirms, delete your message in Sideband to keep the key out of your local history."
+            )
+        candidate = arg.strip()
+        if len(candidate) < 20:
+            return CommandResult("that doesn't look like a Venice key. paste the full string from venice.ai.")
+        ok, msg = venice.validate_key(candidate)
+        if not ok:
+            return CommandResult(f"key didn't work: {msg}\n\nnothing saved. try again with /setkey.")
+        enc = keystore.encrypt(candidate)
+        last4 = candidate[-4:]
+        memory.set_peer_api_key(peer_hash, "venice", enc, last4)
+        return CommandResult(
+            f"key saved (…{last4}). future prompts go through your Venice account.\n\n"
+            "the shared bot quota no longer applies to you.\n\n"
+            "remove anytime with /clearkey. check with /keystatus.\n\n"
+            "now delete your /setkey message in Sideband."
+        )
+
+    if cmd == "/clearkey":
+        n = memory.clear_peer_api_key(peer_hash)
+        if not n:
+            return CommandResult("no key was set.")
+        return CommandResult("cleared. you're back on the shared bot key (quota applies).")
+
+    if cmd == "/keystatus":
+        row = memory.get_peer_api_key(peer_hash)
+        if not row:
+            return CommandResult("no personal key set. use /setkey to bring your own.")
+        provider, _enc, last4, status, last_used = row
+        when = "never" if not last_used else f"{int((time.time() - last_used) // 60)} min ago"
+        status_str = status or "untested since save"
+        return CommandResult(
+            f"personal key: {provider} …{last4}\n\n"
+            f"last used: {when}\n\n"
+            f"last status: {status_str}"
+        )
 
     if cmd == "/owner":
         owner = (cfg.owner.lxmf_addr or "").lower()

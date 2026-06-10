@@ -47,6 +47,24 @@ CREATE TABLE IF NOT EXISTS peer_quotas (
     peer_hash TEXT PRIMARY KEY,
     tokens    INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS peer_api_keys (
+    peer_hash    TEXT PRIMARY KEY,
+    provider     TEXT NOT NULL,
+    enc_key      BLOB NOT NULL,
+    last4        TEXT NOT NULL,
+    last_status  TEXT,
+    last_used_at INTEGER,
+    created_at   INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS byok_usage (
+    peer_hash TEXT NOT NULL,
+    day       TEXT NOT NULL,
+    tokens    INTEGER NOT NULL DEFAULT 0,
+    messages  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (peer_hash, day)
+);
 """
 
 
@@ -206,3 +224,74 @@ class Memory:
             "SELECT tokens FROM peer_quotas WHERE peer_hash = ?", (peer_hash,)
         ).fetchone()
         return int(row[0]) if row else None
+
+    # ---- BYOK ----
+    def set_peer_api_key(
+        self, peer_hash: str, provider: str, enc_key: bytes, last4: str
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO peer_api_keys
+                (peer_hash, provider, enc_key, last4, last_status, last_used_at, created_at)
+            VALUES (?, ?, ?, ?, NULL, NULL, ?)
+            ON CONFLICT(peer_hash) DO UPDATE SET
+                provider     = excluded.provider,
+                enc_key      = excluded.enc_key,
+                last4        = excluded.last4,
+                last_status  = NULL,
+                last_used_at = NULL
+            """,
+            (peer_hash, provider, enc_key, last4, int(time.time())),
+        )
+
+    def get_peer_api_key(
+        self, peer_hash: str
+    ) -> tuple[str, bytes, str, str | None, int | None] | None:
+        """Returns (provider, enc_key, last4, last_status, last_used_at) or None."""
+        row = self._conn.execute(
+            "SELECT provider, enc_key, last4, last_status, last_used_at "
+            "FROM peer_api_keys WHERE peer_hash = ?",
+            (peer_hash,),
+        ).fetchone()
+        if not row:
+            return None
+        return (row[0], row[1], row[2], row[3], int(row[4]) if row[4] is not None else None)
+
+    def clear_peer_api_key(self, peer_hash: str) -> int:
+        cur = self._conn.execute(
+            "DELETE FROM peer_api_keys WHERE peer_hash = ?", (peer_hash,)
+        )
+        return cur.rowcount
+
+    def touch_peer_api_key(self, peer_hash: str, status: str) -> None:
+        self._conn.execute(
+            "UPDATE peer_api_keys SET last_status = ?, last_used_at = ? WHERE peer_hash = ?",
+            (status, int(time.time()), peer_hash),
+        )
+
+    def add_byok_usage(self, peer_hash: str, tokens: int) -> None:
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        self._conn.execute(
+            """
+            INSERT INTO byok_usage (peer_hash, day, tokens, messages)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(peer_hash, day) DO UPDATE SET
+                tokens   = byok_usage.tokens + excluded.tokens,
+                messages = byok_usage.messages + 1
+            """,
+            (peer_hash, day, tokens),
+        )
+
+    def byok_usage_today(self, peer_hash: str) -> tuple[int, int]:
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        row = self._conn.execute(
+            "SELECT tokens, messages FROM byok_usage WHERE peer_hash = ? AND day = ?",
+            (peer_hash, day),
+        ).fetchone()
+        return (int(row[0]), int(row[1])) if row else (0, 0)
+
+    def byok_peer_count(self) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM peer_api_keys"
+        ).fetchone()
+        return int(row[0]) if row else 0
