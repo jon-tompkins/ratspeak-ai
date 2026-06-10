@@ -293,12 +293,22 @@ class Bot:
                     time.sleep(0.25)
                     if RNS.Transport.has_path(dest.hash):
                         break
+            # OPPORTUNISTIC delivers in a single Reticulum packet — much more
+            # reliable in our setup than DIRECT (which needs a live link and
+            # has been silently dying after path discovery). For replies that
+            # don't fit in one packet, fall back to DIRECT.
+            payload_size = len(text.encode("utf-8")) + len(title.encode("utf-8"))
+            if payload_size <= 220:
+                method = LXMF.LXMessage.OPPORTUNISTIC
+            else:
+                method = LXMF.LXMessage.DIRECT
+                log.info("reply payload %d bytes — using DIRECT (large)", payload_size)
             lxm = LXMF.LXMessage(
                 dest,
                 self._dest,
                 text,
                 title=title,
-                desired_method=LXMF.LXMessage.DIRECT,
+                desired_method=method,
                 include_ticket=True,
             )
             self._router.handle_outbound(lxm)
