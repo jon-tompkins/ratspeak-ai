@@ -19,11 +19,16 @@ you were using the Venice web UI).
 
 ---
 
-## Step 1 — Connect your client to the Ratspeak hub
+## Step 1 — Connect your client to the bot's hub
 
-You and the bot need to share at least one Reticulum hub. The bot lives on `1.ratspeak.org:4242`.
+You and the bot need to share at least one Reticulum hub. The bot lives on **`1.ratspeak.org` port `4242`** (note the port — `:4141` is a different network on the same host).
 
-**Ratspeak app:** nothing to do — it ships connected to `1.ratspeak.org` out of the box. Skip to step 2.
+**Ratspeak app:**
+1. Network → **+** under Internet/TCP → **Edit Connection**.
+2. Host: `1.ratspeak.org` · Port: **`4242`** · Name: `ratspeak4242` (or anything).
+3. Save. You should see a green dot next to it within a few seconds.
+
+(The app ships with `1.ratspeak.org:4141` by default — that's a separate hub and won't reach the bot. You need to add `:4242` explicitly.)
 
 **Sideband (Android):**
 1. Side menu → **Connectivity**.
@@ -31,8 +36,6 @@ You and the bot need to share at least one Reticulum hub. The bot lives on `1.ra
 3. Host: `1.ratspeak.org` · Port: `4242`. Save.
 
 **Nomadnet / raw RNS:** add a `TCPClientInterface` pointing at `1.ratspeak.org:4242` in your `~/.reticulum/config`.
-
-Any other hub bridged to `1.ratspeak.org` works too.
 
 ---
 
@@ -128,8 +131,11 @@ realistic chat costs are fractions of a cent per turn. Heavier models like
 
 ## Troubleshooting
 
-- **No reply after sending.** Your client may not have a path to the bot yet.
-  Tap the conversation → **Request Path**, wait 10–30s, try again.
+- **No reply after sending (message gets the checkmark but bot never answers).**
+  Almost always a hub mismatch — your client is on a different Reticulum hub
+  than the bot. Double-check Step 1: you need a connection to **`1.ratspeak.org`
+  port `4242`** (not `4141`). The Ratspeak app's default `:4141` connection
+  will route your message in but the reply has nowhere to go.
 - **"this bot is BYOK-only — set your own Venice key first."** You haven't
   set a key yet. Run `/setkey <your_key>`.
 - **"key didn't work."** Venice rejected the key in the validation ping.
