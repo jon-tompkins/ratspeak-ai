@@ -62,6 +62,26 @@ class Bot:
         )
         self._router.register_delivery_callback(self._on_message)
 
+        # Optional second destination on the same router. Used to expose a
+        # BYOK-only address alongside the personal/subsidized one. Identity is
+        # persisted so the address stays stable across restarts.
+        self._byok_dest = None
+        if cfg.byok_destination.enabled:
+            byok_id_path = storage / cfg.byok_destination.identity_file
+            if byok_id_path.is_file():
+                byok_identity = RNS.Identity.from_file(str(byok_id_path))
+                log.info("loaded existing byok identity")
+            else:
+                byok_identity = RNS.Identity()
+                byok_identity.to_file(str(byok_id_path))
+                log.info("generated new byok identity at %s", byok_id_path)
+            self._byok_dest = self._router.register_delivery_identity(
+                byok_identity,
+                display_name=cfg.byok_destination.display_name,
+                stamp_cost=cfg.bot.stamp_cost,
+            )
+            log.info("byok LXMF address: %s", RNS.prettyhexrep(self._byok_dest.hash))
+
         # --- Subsystems ---
         self._memory = Memory(cfg.memory.db_path, cfg.memory.history_turns)
         self._ratelimit = RateLimiter(
@@ -89,11 +109,14 @@ class Bot:
             while not self._stop.is_set():
                 now = time.monotonic()
                 if now - last_announce >= self.cfg.bot.announce_interval:
-                    try:
-                        self._router.announce(self._dest.hash)
-                        log.info("announced %s", RNS.prettyhexrep(self._dest.hash))
-                    except Exception as exc:  # pragma: no cover — RNS internal errors
-                        log.warning("announce failed: %s", exc)
+                    for dest in (self._dest, self._byok_dest):
+                        if dest is None:
+                            continue
+                        try:
+                            self._router.announce(dest.hash)
+                            log.info("announced %s", RNS.prettyhexrep(dest.hash))
+                        except Exception as exc:  # pragma: no cover
+                            log.warning("announce failed: %s", exc)
                     last_announce = now
                 self._stop.wait(timeout=5)
         finally:
@@ -113,6 +136,7 @@ class Bot:
             title = message.title_as_string() or ""
             source_identity = message.source
             source_hash = message.source_hash
+            dest_hash = getattr(message, "destination_hash", None)
         except Exception as exc:
             log.exception("failed to read inbound message: %s", exc)
             return
@@ -120,13 +144,27 @@ class Bot:
         if not body:
             return
 
+        # Which of our destinations did this hit? Defaults to the primary if
+        # the message has no destination_hash for some reason.
+        from_dest = self._dest
+        byok_route = False
+        if (
+            self._byok_dest is not None
+            and dest_hash is not None
+            and bytes(dest_hash) == bytes(self._byok_dest.hash)
+        ):
+            from_dest = self._byok_dest
+            byok_route = True
+
         peer_hex = RNS.hexrep(source_hash, delimit=False)
         display_name = title if title else None
-        log.info("inbound from %s (%d chars)", peer_hex, len(body))
+        log.info("inbound from %s -> %s (%d chars)", peer_hex,
+                 "byok" if byok_route else "main", len(body))
 
         t = threading.Thread(
             target=self._handle_message,
-            args=(peer_hex, source_identity, source_hash, body, display_name),
+            args=(peer_hex, source_identity, source_hash, body, display_name,
+                  from_dest, byok_route),
             daemon=True,
         )
         t.start()
@@ -138,7 +176,11 @@ class Bot:
         source_hash: bytes,
         body: str,
         display_name: str | None,
+        from_dest=None,
+        byok_route: bool = False,
     ) -> None:
+        if from_dest is None:
+            from_dest = self._dest
         self._memory.touch_peer(peer_hex, display_name)
 
         is_owner = bool(self.cfg.owner.lxmf_addr) and peer_hex.lower() == self.cfg.owner.lxmf_addr.lower()
@@ -158,7 +200,7 @@ class Bot:
             keystore=self._keystore,
         )
         if cmd_result is not None:
-            self._send_reply(source_identity or source_hash, cmd_result.reply)
+            self._send_reply(source_identity or source_hash, cmd_result.reply, from_dest=from_dest)
             return
 
         # BYOK: if peer has a personal key, decrypt it and skip the shared quota.
@@ -170,14 +212,19 @@ class Bot:
                 log.warning("could not decrypt stored key for %s; dropping it", peer_hex)
                 self._memory.clear_peer_api_key(peer_hex)
 
+        # BYOK-only mode applies when the bot is globally byok_only OR the
+        # message hit our byok destination.
+        byok_only = self.cfg.bot.byok_only or byok_route
+
         if not byok_key:
-            if self.cfg.bot.byok_only:
+            if byok_only:
                 self._send_reply(
                     source_identity or source_hash,
-                    "this bot is BYOK-only — set your own Venice key first.\n\n"
+                    "this address is BYOK-only — set your own Venice key first.\n\n"
                     "1. grab one at venice.ai → API → Keys\n\n"
                     "2. send: /setkey <your_key>\n\n"
                     "then prompt as normal. see /help for more.",
+                    from_dest=from_dest,
                 )
                 return
             # Rate / quota (per-peer override > global) — only applies to shared key.
@@ -185,7 +232,7 @@ class Bot:
             peer_quota = self._memory.get_peer_quota(peer_hex)
             decision = self._ratelimit.check(peer_hex, tokens_today, quota_override=peer_quota)
             if not decision.allowed:
-                self._send_reply(source_identity or source_hash, decision.reason)
+                self._send_reply(source_identity or source_hash, decision.reason, from_dest=from_dest)
                 return
 
         # Build chat context
@@ -216,11 +263,13 @@ class Bot:
                     source_identity or source_hash,
                     "your Venice key was rejected — i've removed it. "
                     "check venice.ai → API → Keys and try /setkey again.",
+                    from_dest=from_dest,
                 )
             else:
                 self._send_reply(
                     source_identity or source_hash,
                     "the shared bot key was rejected by the provider. owner has been notified.",
+                    from_dest=from_dest,
                 )
             return
         except Exception as exc:
@@ -228,6 +277,7 @@ class Bot:
             self._send_reply(
                 source_identity or source_hash,
                 "Sorry — the model call failed. Try again, or /reset if it keeps happening.",
+                from_dest=from_dest,
             )
             return
 
@@ -251,13 +301,15 @@ class Bot:
             result.prompt_tokens,
             result.completion_tokens,
         )
-        self._send_reply(source_identity or source_hash, reply, title="Re: " + (display_name or "chat"))
+        self._send_reply(source_identity or source_hash, reply, title="Re: " + (display_name or "chat"), from_dest=from_dest)
 
     # ----------------------------------------------------------------- outbound
 
     def _send_reply(
-        self, source_identity, text: str, *, title: str = "Re: chat"
+        self, source_identity, text: str, *, title: str = "Re: chat", from_dest=None,
     ) -> None:
+        if from_dest is None:
+            from_dest = self._dest
         try:
             identity = source_identity
             identity_hash = None
@@ -283,7 +335,7 @@ class Bot:
             )
             lxm = LXMF.LXMessage(
                 dest,
-                self._dest,
+                from_dest,
                 text,
                 title=title,
                 desired_method=LXMF.LXMessage.DIRECT,

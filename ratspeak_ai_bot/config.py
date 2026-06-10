@@ -56,6 +56,18 @@ class OwnerConfig:
 
 
 @dataclass
+class ByokDestinationConfig:
+    """A second LXMF destination on the same bot process, forced byok_only.
+
+    Lets one process expose two contact addresses — one personal/subsidized,
+    one BYOK-only — without running a second Reticulum stack.
+    """
+    enabled: bool = False
+    display_name: str = "ratspeak-ai-byok"
+    identity_file: str = "identity-byok"
+
+
+@dataclass
 class Config:
     bot: BotConfig = field(default_factory=BotConfig)
     venice: VeniceConfig = field(default_factory=VeniceConfig)
@@ -63,6 +75,7 @@ class Config:
     ratelimit: RateLimitConfig = field(default_factory=RateLimitConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     owner: OwnerConfig = field(default_factory=OwnerConfig)
+    byok_destination: ByokDestinationConfig = field(default_factory=ByokDestinationConfig)
 
 
 def load(path: str | os.PathLike[str]) -> Config:
@@ -79,6 +92,7 @@ def load(path: str | os.PathLike[str]) -> Config:
         ratelimit=RateLimitConfig(**raw.get("ratelimit", {})),
         logging=LoggingConfig(**raw.get("logging", {})),
         owner=OwnerConfig(**raw.get("owner", {})),
+        byok_destination=ByokDestinationConfig(**raw.get("byok_destination", {})),
     )
 
     api_key = os.environ.get("VENICE_API_KEY", "").strip()
