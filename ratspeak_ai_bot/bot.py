@@ -281,6 +281,18 @@ class Bot:
                 "lxmf",
                 "delivery",
             )
+            # LXMF DIRECT delivery needs a known Reticulum path to the
+            # destination. We almost always have a path to the *identity* (we
+            # just received from it), but not necessarily to the lxmf/delivery
+            # destination derived from it. If missing, kick off path discovery
+            # and give it a brief window to resolve before queueing.
+            if not RNS.Transport.has_path(dest.hash):
+                log.info("no path to %s, requesting", RNS.prettyhexrep(dest.hash))
+                RNS.Transport.request_path(dest.hash)
+                for _ in range(20):  # up to ~5s
+                    time.sleep(0.25)
+                    if RNS.Transport.has_path(dest.hash):
+                        break
             lxm = LXMF.LXMessage(
                 dest,
                 self._dest,
