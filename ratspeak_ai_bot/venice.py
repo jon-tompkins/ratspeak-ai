@@ -32,13 +32,17 @@ class VeniceClient:
     """
 
     def __init__(self, base_url: str, api_key: str, default_model: str):
-        if not api_key:
-            raise ValueError(
-                "No API key. Set VENICE_API_KEY (or whichever provider) before starting."
-            )
         self._base_url = base_url
-        self._client = OpenAI(base_url=base_url, api_key=api_key)
+        # BYOK-only deployments may run without a shared key. We still need the
+        # client object for things like list_models / validate_key, so pass a
+        # placeholder; any call that tries to actually use it will 401.
+        self._client = OpenAI(base_url=base_url, api_key=api_key or "byok-only")
+        self._has_shared_key = bool(api_key)
         self._default_model = default_model
+
+    @property
+    def has_shared_key(self) -> bool:
+        return self._has_shared_key
 
     @property
     def base_url(self) -> str:

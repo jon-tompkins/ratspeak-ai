@@ -26,9 +26,10 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
 
-    if not cfg.venice.api_key:
+    if not cfg.venice.api_key and not cfg.bot.byok_only:
         print(
-            "ERROR: VENICE_API_KEY is not set. Export it before starting the bot.",
+            "ERROR: VENICE_API_KEY is not set. Export it before starting the bot, "
+            "or enable byok_only mode in [bot] to require per-user keys.",
             file=sys.stderr,
         )
         return 2

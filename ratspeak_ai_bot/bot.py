@@ -171,6 +171,15 @@ class Bot:
                 self._memory.clear_peer_api_key(peer_hex)
 
         if not byok_key:
+            if self.cfg.bot.byok_only:
+                self._send_reply(
+                    source_identity or source_hash,
+                    "this bot is BYOK-only — set your own Venice key first.\n\n"
+                    "1. grab one at venice.ai → API → Keys\n\n"
+                    "2. send: /setkey <your_key>\n\n"
+                    "then prompt as normal. see /help for more.",
+                )
+                return
             # Rate / quota (per-peer override > global) — only applies to shared key.
             tokens_today, _ = self._memory.usage_today(peer_hex)
             peer_quota = self._memory.get_peer_quota(peer_hex)

@@ -18,6 +18,7 @@ class BotConfig:
     announce_interval: int = 21600
     stamp_cost: int = 8
     reticulum_configdir: str = ""
+    byok_only: bool = False
 
 
 @dataclass
