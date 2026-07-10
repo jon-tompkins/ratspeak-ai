@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from . import tiers
 from .config import Config
 from .keystore import Keystore
 from .memory import Memory
@@ -215,6 +216,12 @@ def handle_command(
         candidate = arg.strip()
         if len(candidate) < 20:
             return CommandResult("that doesn't look like a Venice key. paste the full string from venice.ai.")
+        tier = tiers.registration_tier(peer_hash, cfg.tiers.supabase_url, cfg.tiers.supabase_key)
+        if not tiers.meets_min_tier(tier, cfg.tiers.byok_min_tier):
+            return CommandResult(
+                f"🔒 bring-your-own-key requires RATSPEAK {cfg.tiers.byok_min_tier.title()} tier or higher.\n\n"
+                "register your wallet at the Ratspeak Badges site, then send /setkey again."
+            )
         ok, msg = venice.validate_key(candidate)
         if not ok:
             return CommandResult(f"key didn't work: {msg}\n\nnothing saved. try again with /setkey.")

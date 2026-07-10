@@ -56,6 +56,16 @@ class OwnerConfig:
 
 
 @dataclass
+class TiersConfig:
+    supabase_url: str = ""
+    supabase_key: str = ""
+    # Min Ratspeak Badges tier required to use the shared (bot-billed) key.
+    shared_min_tier: str = "gold"
+    # Min tier required to register a personal key via /setkey.
+    byok_min_tier: str = "bronze"
+
+
+@dataclass
 class Config:
     bot: BotConfig = field(default_factory=BotConfig)
     venice: VeniceConfig = field(default_factory=VeniceConfig)
@@ -63,6 +73,7 @@ class Config:
     ratelimit: RateLimitConfig = field(default_factory=RateLimitConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     owner: OwnerConfig = field(default_factory=OwnerConfig)
+    tiers: TiersConfig = field(default_factory=TiersConfig)
 
 
 def load(path: str | os.PathLike[str]) -> Config:
@@ -79,6 +90,7 @@ def load(path: str | os.PathLike[str]) -> Config:
         ratelimit=RateLimitConfig(**raw.get("ratelimit", {})),
         logging=LoggingConfig(**raw.get("logging", {})),
         owner=OwnerConfig(**raw.get("owner", {})),
+        tiers=TiersConfig(**raw.get("tiers", {})),
     )
 
     api_key = os.environ.get("VENICE_API_KEY", "").strip()
@@ -88,5 +100,13 @@ def load(path: str | os.PathLike[str]) -> Config:
     owner_addr = os.environ.get("OWNER_LXMF_ADDR", "").strip().lower()
     if owner_addr:
         cfg.owner.lxmf_addr = owner_addr
+
+    supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+    if supabase_url:
+        cfg.tiers.supabase_url = supabase_url
+
+    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if supabase_key:
+        cfg.tiers.supabase_key = supabase_key
 
     return cfg

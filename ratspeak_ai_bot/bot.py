@@ -9,6 +9,7 @@ from pathlib import Path
 import LXMF
 import RNS
 
+from . import tiers
 from .commands import handle_command
 from .config import Config
 from .keystore import Keystore
@@ -83,8 +84,11 @@ class Bot:
         signal.signal(signal.SIGINT, self._signal)
         signal.signal(signal.SIGTERM, self._signal)
 
-        # Announce once on start, then on the configured interval.
-        last_announce = 0.0
+        # Announce once on start, then on the configured interval. time.monotonic() is
+        # roughly seconds-since-boot on Linux, not an arbitrarily large epoch, so a plain
+        # 0.0 sentinel silently skips the first announce on any box with uptime shorter
+        # than announce_interval. Backdating avoids that.
+        last_announce = time.monotonic() - self.cfg.bot.announce_interval
         try:
             while not self._stop.is_set():
                 now = time.monotonic()
@@ -178,6 +182,16 @@ class Bot:
                     "1. grab one at venice.ai → API → Keys\n\n"
                     "2. send: /setkey <your_key>\n\n"
                     "then prompt as normal. see /help for more.",
+                )
+                return
+            tier = tiers.registration_tier(peer_hex, self.cfg.tiers.supabase_url, self.cfg.tiers.supabase_key)
+            if not tiers.meets_min_tier(tier, self.cfg.tiers.shared_min_tier):
+                self._send_reply(
+                    source_identity or source_hash,
+                    f"🔒 the free shared bot requires RATSPEAK {self.cfg.tiers.shared_min_tier.title()} "
+                    "tier or higher.\n\n"
+                    "register your wallet at the Ratspeak Badges site, or bring your own Venice key "
+                    f"with /setkey ({self.cfg.tiers.byok_min_tier.title()} tier+).",
                 )
                 return
             # Rate / quota (per-peer override > global) — only applies to shared key.
