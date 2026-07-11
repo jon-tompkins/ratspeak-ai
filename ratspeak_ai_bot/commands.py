@@ -19,6 +19,7 @@ HELP_TEXT = (
     "/model <name> — switch model (must be on /models)\n\n"
     "/models — list allowed models\n\n"
     "/usage — your usage today\n\n"
+    "/status — bot info, your model, limits, registration status\n\n"
     "/setkey <venice_api_key> — bring your own key; billed to you\n\n"
     "/keystatus — show whether a personal key is set\n\n"
     "/clearkey — remove your stored key\n\n"
@@ -41,6 +42,10 @@ OWNER_HELP_TEXT = (
 
 def _short(peer: str) -> str:
     return peer[:10] + "…" if len(peer) > 12 else peer
+
+
+def registration_hint(cfg: Config, min_tier: str) -> str:
+    return f"register your wallet at {cfg.tiers.badges_url} ({min_tier.title()} tier or higher)."
 
 
 def _handle_owner(
@@ -144,6 +149,7 @@ def handle_command(
     memory: Memory,
     venice: VeniceClient,
     keystore: Keystore,
+    bot_address: str = "",
 ) -> CommandResult | None:
     """Returns a CommandResult if `text` was a slash command, else None."""
     s = text.strip()
@@ -205,6 +211,42 @@ def handle_command(
             lines.append(f"Today (your key): {byok_msgs} messages, {byok_tokens} tokens (no bot-side quota).")
         return CommandResult("\n\n".join(lines))
 
+    if cmd == "/status":
+        current = memory.get_model(peer_hash) or memory.get_setting("default_model") or cfg.venice.default_model
+        key_row = memory.get_peer_api_key(peer_hash)
+        mode = "BYOK-only" if cfg.bot.byok_only else "shared key + BYOK"
+
+        lines = [
+            f"{cfg.bot.display_name}" + (f" ({bot_address})" if bot_address else ""),
+            f"mode: {mode}\n\nprovider: {cfg.venice.base_url}\n\nyour model: {current}",
+        ]
+
+        tier = tiers.registration_tier(peer_hash, cfg.tiers.supabase_url, cfg.tiers.supabase_key)
+        if tier:
+            lines.append(f"registration: RATSPEAK {tier.title()} tier ✅")
+        else:
+            lines.append(
+                f"registration: not registered\n\n{registration_hint(cfg, cfg.tiers.shared_min_tier)}"
+            )
+
+        if key_row:
+            lines.append(f"billing: your Venice key (…{key_row[2]})")
+        elif not cfg.bot.byok_only:
+            window_min = cfg.ratelimit.window_seconds // 60
+            override = memory.get_peer_quota(peer_hash)
+            quota = override if override else cfg.ratelimit.daily_token_quota
+            tokens_today, msgs_today = memory.usage_today(peer_hash)
+            quota_str = f"{tokens_today}/{quota} tokens today" if quota else f"{tokens_today} tokens today (unlimited)"
+            lines.append(
+                f"billing: shared bot key\n\n"
+                f"limits: {cfg.ratelimit.messages_per_window} msgs / {window_min} min, "
+                f"{quota_str} ({msgs_today} messages sent)\n\n"
+                f"requires RATSPEAK {cfg.tiers.shared_min_tier.title()} tier or higher"
+            )
+
+        lines.append("see /help for commands")
+        return CommandResult("\n\n".join(lines))
+
     if cmd == "/setkey":
         if not arg:
             return CommandResult(
@@ -220,7 +262,8 @@ def handle_command(
         if not tiers.meets_min_tier(tier, cfg.tiers.byok_min_tier):
             return CommandResult(
                 f"🔒 bring-your-own-key requires RATSPEAK {cfg.tiers.byok_min_tier.title()} tier or higher.\n\n"
-                "register your wallet at the Ratspeak Badges site, then send /setkey again."
+                f"{registration_hint(cfg, cfg.tiers.byok_min_tier)}\n\n"
+                "then send /setkey again."
             )
         ok, msg = venice.validate_key(candidate)
         if not ok:

@@ -63,6 +63,8 @@ class TiersConfig:
     shared_min_tier: str = "gold"
     # Min tier required to register a personal key via /setkey.
     byok_min_tier: str = "bronze"
+    # Where unregistered peers are told to go to register a wallet.
+    badges_url: str = "https://ratspeak-badges.vercel.app/register"
 
 
 @dataclass

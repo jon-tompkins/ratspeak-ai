@@ -70,3 +70,15 @@ daily_token_quota = 50000
 [logging]
 # debug | info | warning | error
 level = "info"
+
+
+[tiers]
+# Supabase creds come from SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY env vars.
+# Min Ratspeak Badges tier required to use the shared (bot-billed) key.
+shared_min_tier = "gold"
+
+# Min tier required to register a personal key via /setkey.
+byok_min_tier = "bronze"
+
+# Where unregistered peers are told to go to register a wallet.
+badges_url = "https://ratspeak-badges.vercel.app/register"

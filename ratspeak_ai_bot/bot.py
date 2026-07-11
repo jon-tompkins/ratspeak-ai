@@ -10,7 +10,7 @@ import LXMF
 import RNS
 
 from . import tiers
-from .commands import handle_command
+from .commands import handle_command, registration_hint
 from .config import Config
 from .keystore import Keystore
 from .memory import Memory
@@ -160,6 +160,7 @@ class Bot:
             memory=self._memory,
             venice=self._venice,
             keystore=self._keystore,
+            bot_address=RNS.prettyhexrep(self._dest.hash),
         )
         if cmd_result is not None:
             self._send_reply(source_identity or source_hash, cmd_result.reply)
@@ -180,7 +181,8 @@ class Bot:
                     source_identity or source_hash,
                     "this bot is BYOK-only — set your own Venice key first.\n\n"
                     "1. grab one at venice.ai → API → Keys\n\n"
-                    "2. send: /setkey <your_key>\n\n"
+                    f"2. send: /setkey <your_key> (requires RATSPEAK {self.cfg.tiers.byok_min_tier.title()} "
+                    f"tier+ — {self.cfg.tiers.badges_url})\n\n"
                     "then prompt as normal. see /help for more.",
                 )
                 return
@@ -190,8 +192,9 @@ class Bot:
                     source_identity or source_hash,
                     f"🔒 the free shared bot requires RATSPEAK {self.cfg.tiers.shared_min_tier.title()} "
                     "tier or higher.\n\n"
-                    "register your wallet at the Ratspeak Badges site, or bring your own Venice key "
-                    f"with /setkey ({self.cfg.tiers.byok_min_tier.title()} tier+).",
+                    f"{registration_hint(self.cfg, self.cfg.tiers.shared_min_tier)}\n\n"
+                    "or bring your own Venice key with /setkey "
+                    f"({self.cfg.tiers.byok_min_tier.title()} tier+).",
                 )
                 return
             # Rate / quota (per-peer override > global) — only applies to shared key.
