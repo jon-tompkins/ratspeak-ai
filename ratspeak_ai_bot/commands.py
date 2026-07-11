@@ -10,22 +10,50 @@ from .memory import Memory
 from .venice import VeniceClient
 
 
-HELP_TEXT = (
-    "ratspeak-ai commands\n\n"
-    "/help — this message\n\n"
-    "/about — what this bot is, and your current model\n\n"
-    "/reset — clear our conversation history\n\n"
-    "/model — show your current model\n\n"
-    "/model <name> — switch model (must be on /models)\n\n"
-    "/models — list allowed models\n\n"
-    "/usage — your usage today\n\n"
-    "/status — bot info, your model, limits, registration status\n\n"
-    "/setkey <venice_api_key> — bring your own key; billed to you\n\n"
-    "/keystatus — show whether a personal key is set\n\n"
-    "/clearkey — remove your stored key\n\n"
-    "/owner help — admin commands (owner only)\n\n"
-    "anything else is treated as a prompt."
-)
+def _peer_line(cfg: Config) -> str:
+    if not cfg.bot.peer_address:
+        return ""
+    label = cfg.bot.peer_label or "the other ratspeak-ai bot"
+    return f"{label}: <{cfg.bot.peer_address}>"
+
+
+def help_text(cfg: Config) -> str:
+    peer = _peer_line(cfg)
+    if cfg.bot.byok_only:
+        commands = (
+            "/help — this message\n\n"
+            "/about — what this bot is\n\n"
+            "/reset — clear our conversation history\n\n"
+            "/model — show your current model\n\n"
+            "/model <name> — switch model (must be on /models)\n\n"
+            "/models — list allowed models\n\n"
+            "/usage — your usage today\n\n"
+            "/status — bot info, your model, limits, registration status\n\n"
+            "/setkey <venice_api_key> — required before this bot will answer; billed to your account\n\n"
+            "/keystatus — show whether your key is set\n\n"
+            "/clearkey — remove your stored key\n\n"
+            "/owner help — admin commands (owner only)\n\n"
+            "anything else is treated as a prompt, once your key is set."
+        )
+        footer = f"\n\ndon't want to bring your own key? try the shared/subsidized bot instead — {peer}" if peer else ""
+    else:
+        commands = (
+            "/help — this message\n\n"
+            "/about — what this bot is, and your current model\n\n"
+            "/reset — clear our conversation history\n\n"
+            "/model — show your current model\n\n"
+            "/model <name> — switch model (must be on /models)\n\n"
+            "/models — list allowed models\n\n"
+            "/usage — your usage today\n\n"
+            "/status — bot info, your model, limits, registration status\n\n"
+            "/setkey <venice_api_key> — optional upgrade off the shared quota; billed to your account\n\n"
+            "/keystatus — show whether a personal key is set\n\n"
+            "/clearkey — remove your stored key\n\n"
+            "/owner help — admin commands (owner only)\n\n"
+            "anything else is treated as a prompt."
+        )
+        footer = f"\n\nprefer bring-your-own-key from the start? there's a dedicated bot for that — {peer}" if peer else ""
+    return f"ratspeak-ai commands\n\n{commands}{footer}"
 
 OWNER_HELP_TEXT = (
     "owner commands\n\n"
@@ -126,13 +154,32 @@ def _handle_owner(
 
     return CommandResult(f"unknown owner subcommand: {sub}. try /owner help")
 
-ABOUT_TEXT = (
-    "ratspeak-ai is a gateway bot bridging Reticulum/LXMF to a clearnet inference API.\n\n"
-    "your message is end-to-end encrypted on the mesh, but i forward the text to the model "
-    "provider over TLS — they see your prompts.\n\n"
-    "don't send anything you wouldn't want a third party to read.\n\n"
-    "source: github.com/jon-tompkins/ratspeak-ai"
-)
+def about_text(cfg: Config) -> str:
+    peer = _peer_line(cfg)
+    privacy = (
+        "your message is end-to-end encrypted on the mesh, but i forward the text to the model "
+        "provider over TLS — they see your prompts.\n\n"
+        "don't send anything you wouldn't want a third party to read."
+    )
+    if cfg.bot.byok_only:
+        mode_line = (
+            "this is the bring-your-own-key gateway: every reply is billed to your own Venice "
+            "account via /setkey, with no shared quota and no bot-side rate limit."
+        )
+        peer_line = f"\n\nnot ready to bring a key? there's a subsidized bot with a shared quota — {peer}" if peer else ""
+    else:
+        mode_line = (
+            "this is the subsidized gateway: replies come out of a shared bot key, rate-limited "
+            "per person."
+        )
+        peer_line = f"\n\nwant to skip the shared quota entirely? there's a bring-your-own-key bot — {peer}" if peer else ""
+    return (
+        "ratspeak-ai is a gateway bot bridging Reticulum/LXMF to a clearnet inference API.\n\n"
+        f"{mode_line}\n\n"
+        f"{privacy}"
+        f"{peer_line}\n\n"
+        "source: github.com/jon-tompkins/ratspeak-ai"
+    )
 
 
 @dataclass
@@ -161,25 +208,25 @@ def handle_command(
     arg = parts[1].strip() if len(parts) > 1 else ""
 
     if cmd in ("/help", "/?", "/h"):
-        return CommandResult(HELP_TEXT)
+        return CommandResult(help_text(cfg))
 
     if cmd == "/about":
         current = memory.get_model(peer_hash) or memory.get_setting("default_model") or cfg.venice.default_model
         global_default = memory.get_setting("default_model") or cfg.venice.default_model
         key_row = memory.get_peer_api_key(peer_hash)
-        billing = (
-            f"billed to: your Venice key (…{key_row[2]})"
-            if key_row
-            else "billed to: shared bot key (rate-limited)"
-        )
+        if key_row:
+            billing = f"billed to: your Venice key (…{key_row[2]})"
+        elif cfg.bot.byok_only:
+            billing = "billed to: nothing yet — send /setkey to set your Venice key"
+        else:
+            billing = "billed to: shared bot key (rate-limited)"
         meta = (
             f"\n\nyour model: {current}\n\n"
             f"global default: {global_default}\n\n"
             f"provider: {cfg.venice.base_url}\n\n"
-            f"{billing}\n\n"
-            f"set your own key with /setkey — see /help"
+            f"{billing}"
         )
-        return CommandResult(ABOUT_TEXT + meta)
+        return CommandResult(about_text(cfg) + meta)
 
     if cmd == "/reset":
         n = memory.reset(peer_hash)

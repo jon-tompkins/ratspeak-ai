@@ -19,6 +19,10 @@ class BotConfig:
     stamp_cost: int = 8
     reticulum_configdir: str = ""
     byok_only: bool = False
+    # LXMF address + label of the sibling bot (BYOK <-> subsidized), so /about and /help
+    # can point users at the other mode instead of duplicating it here.
+    peer_address: str = ""
+    peer_label: str = ""
 
 
 @dataclass

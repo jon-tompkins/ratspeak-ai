@@ -18,6 +18,12 @@ stamp_cost = 8
 # Reticulum config dir. Leave empty to use ~/.reticulum.
 reticulum_configdir = ""
 
+# If you run a sibling bot (e.g. this one is subsidized and another is byok_only, or
+# vice versa), point at it here so /about and /help can refer users across instead of
+# each bot duplicating both modes.
+# peer_address = ""
+# peer_label = ""
+
 
 [venice]
 # OpenAI-compatible base URL. Override to point at another provider if you like.
