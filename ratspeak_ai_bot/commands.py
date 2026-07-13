@@ -39,20 +39,15 @@ def help_text(cfg: Config) -> str:
     else:
         commands = (
             "/help — this message\n\n"
-            "/about — what this bot is, and your current model\n\n"
+            "/about — what this bot is and what model it runs (fixed, can't be changed)\n\n"
             "/reset — clear our conversation history\n\n"
-            "/model — show your current model\n\n"
-            "/model <name> — switch model (must be on /models)\n\n"
-            "/models — list allowed models\n\n"
+            "/badge — check your RATSPEAK badge tier / whitelist status\n\n"
             "/usage — your usage today\n\n"
-            "/status — bot info, your model, limits, registration status\n\n"
-            "/setkey <venice_api_key> — optional upgrade off the shared quota; billed to your account\n\n"
-            "/keystatus — show whether a personal key is set\n\n"
-            "/clearkey — remove your stored key\n\n"
+            "/status — bot info, limits, registration status\n\n"
             "/owner help — admin commands (owner only)\n\n"
             "anything else is treated as a prompt."
         )
-        footer = f"\n\nprefer bring-your-own-key from the start? there's a dedicated bot for that — {peer}" if peer else ""
+        footer = f"\n\nwant to pick your own model or bring your own key? there's a dedicated bot for that — {peer}" if peer else ""
     return f"ratspeak-ai commands\n\n{commands}{footer}"
 
 OWNER_HELP_TEXT = (
@@ -170,9 +165,10 @@ def about_text(cfg: Config) -> str:
     else:
         mode_line = (
             "this is the subsidized gateway: replies come out of a shared bot key, rate-limited "
-            "per person."
+            "per person. the model is fixed — there's no /model or /setkey here, just check /badge "
+            "to see if you're whitelisted and start chatting."
         )
-        peer_line = f"\n\nwant to skip the shared quota entirely? there's a bring-your-own-key bot — {peer}" if peer else ""
+        peer_line = f"\n\nwant to pick your own model or bring your own key? there's a dedicated bot for that — {peer}" if peer else ""
     return (
         "ratspeak-ai is a gateway bot bridging Reticulum/LXMF to a clearnet inference API.\n\n"
         f"{mode_line}\n\n"
@@ -232,6 +228,11 @@ def handle_command(
         n = memory.reset(peer_hash)
         return CommandResult(f"Cleared {n} message(s) of history.")
 
+    if cmd in ("/model", "/models") and not cfg.bot.byok_only:
+        peer = _peer_line(cfg)
+        note = f" try the bring-your-own-key bot instead — {peer}" if peer else ""
+        return CommandResult(f"model is fixed on this bot, see /about.{note}")
+
     if cmd == "/model":
         if not arg:
             current = memory.get_model(peer_hash) or cfg.venice.default_model
@@ -247,6 +248,14 @@ def handle_command(
         models = "\n\n".join(f"• {m}" for m in cfg.venice.allowed_models)
         return CommandResult(f"allowed models\n\n{models}")
 
+    if cmd == "/badge":
+        tier = tiers.registration_tier(peer_hash, cfg.tiers.supabase_url, cfg.tiers.supabase_key)
+        if tier:
+            return CommandResult(f"RATSPEAK badge: {tier.title()} tier ✅\n\nwhitelisted: yes")
+        return CommandResult(
+            f"RATSPEAK badge: not registered\n\nwhitelisted: no\n\n{registration_hint(cfg, cfg.tiers.shared_min_tier)}"
+        )
+
     if cmd == "/usage":
         tokens, msgs = memory.usage_today(peer_hash)
         byok_tokens, byok_msgs = memory.byok_usage_today(peer_hash)
@@ -261,7 +270,7 @@ def handle_command(
     if cmd == "/status":
         current = memory.get_model(peer_hash) or memory.get_setting("default_model") or cfg.venice.default_model
         key_row = memory.get_peer_api_key(peer_hash)
-        mode = "BYOK-only" if cfg.bot.byok_only else "shared key + BYOK"
+        mode = "BYOK-only" if cfg.bot.byok_only else "subsidized (fixed model)"
 
         lines = [
             f"{cfg.bot.display_name}" + (f" ({bot_address})" if bot_address else ""),
@@ -293,6 +302,11 @@ def handle_command(
 
         lines.append("see /help for commands")
         return CommandResult("\n\n".join(lines))
+
+    if cmd in ("/setkey", "/clearkey", "/keystatus") and not cfg.bot.byok_only:
+        peer = _peer_line(cfg)
+        note = f" that's what the bring-your-own-key bot is for — {peer}" if peer else ""
+        return CommandResult(f"this bot doesn't support personal keys.{note}")
 
     if cmd == "/setkey":
         if not arg:
